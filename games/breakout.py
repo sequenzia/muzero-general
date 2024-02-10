@@ -139,7 +139,10 @@ class Game(AbstractGame):
     """
 
     def __init__(self, seed=None):
-        self.env = gym.make("Breakout-v4")
+        
+        self.env = gym.make("ALE/Breakout-v5",
+                            render_mode="rgb_array")
+        
         if seed is not None:
             self.env.seed(seed)
 
@@ -153,11 +156,14 @@ class Game(AbstractGame):
         Returns:
             The new observation, the reward and a boolean if the game has ended.
         """
-        observation, reward, done, _ = self.env.step(action)
+
+        observation, reward, terminated, truncated, info = self.env.step(action)
+
         observation = cv2.resize(observation, (96, 96), interpolation=cv2.INTER_AREA)
         observation = numpy.asarray(observation, dtype="float32") / 255.0
         observation = numpy.moveaxis(observation, -1, 0)
-        return observation, reward, done
+
+        return observation, reward, terminated
 
     def legal_actions(self):
         """
@@ -179,7 +185,8 @@ class Game(AbstractGame):
         Returns:
             Initial observation of the game.
         """
-        observation = self.env.reset()
+        observation, info = self.env.reset()
+
         observation = cv2.resize(observation, (96, 96), interpolation=cv2.INTER_AREA)
         observation = numpy.asarray(observation, dtype="float32") / 255.0
         observation = numpy.moveaxis(observation, -1, 0)
