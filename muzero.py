@@ -11,7 +11,6 @@ import nevergrad
 import numpy
 import ray
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 import diagnose_model
 import models
@@ -19,6 +18,10 @@ import replay_buffer
 import self_play
 import shared_storage
 import trainer
+import gym
+
+from typing import List
+from torch.utils.tensorboard import SummaryWriter
 
 
 class MuZero:
@@ -40,6 +43,14 @@ class MuZero:
     """
 
     def __init__(self, game_name, config=None, split_resources_in=1):
+
+        is_atari = False
+
+        if game_name.startswith("atari_"):
+            is_atari = True
+            atari_game_name  = game_name.replace("atari_", "")
+            game_name = "atari"
+
         # Load the game and the config from the module with the game name
         try:
             game_module = importlib.import_module("games." + game_name)
@@ -618,6 +629,21 @@ def load_model_menu(muzero, game_name):
         replay_buffer_path=replay_buffer_path,
     )
 
+def get_atari_games() -> List[str]:
+
+    games = set()
+
+    for game in set(gym.envs.registry.keys()):
+
+        if "ALE/" in game:
+            
+            game = game.replace("ALE/", "")
+            game = game.replace("-ram", "")
+            game = game.replace("-v5", "")
+            
+            games.add(game)
+
+    return sorted(list(games))
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:
@@ -631,82 +657,113 @@ if __name__ == "__main__":
         muzero.train()
     else:
         print("\nWelcome to MuZero! Here's a list of games:")
+
         # Let user pick a game
         games = [
             filename.stem
             for filename in sorted(list((pathlib.Path.cwd() / "games").glob("*.py")))
             if filename.name != "abstract_game.py"
         ]
+        
         for i in range(len(games)):
             print(f"{i}. {games[i]}")
+        
         choice = input("Enter a number to choose the game: ")
+        
         valid_inputs = [str(i) for i in range(len(games))]
+        
         while choice not in valid_inputs:
             choice = input("Invalid input, enter a number listed above: ")
 
         # Initialize MuZero
         choice = int(choice)
-        game_name = games[choice]
+
+        _game_name = games[choice]
+
+        if _game_name == "atari":
+
+            atari_games = get_atari_games()
+
+            print("\nAtari games:\n")
+
+            valid_game_ids = []
+            for id, game in enumerate(atari_games):
+                
+                valid_game_ids.append(id)
+                print(f"{id}. {game}")
+
+            game_id = input("Select Atari game: ")
+
+            while choice not in valid_game_ids:
+                game_id = input("Invalid input, enter a number listed above: ")
+            
+            game_id = int(game_id)
+
+            game_name = f"atari_{atari_games[game_id]}"
+        
+        else:
+            game_name = _game_name
+
         muzero = MuZero(game_name)
 
-        while True:
-            # Configure running options
-            options = [
-                "Train",
-                "Load pretrained model",
-                "Diagnose model",
-                "Render some self play games",
-                "Play against MuZero",
-                "Test the game manually",
-                "Hyperparameter search",
-                "Exit",
-            ]
-            print()
-            for i in range(len(options)):
-                print(f"{i}. {options[i]}")
+        # while True:
+        #     # Configure running options
+        #     options = [
+        #         "Train",
+        #         "Load pretrained model",
+        #         "Diagnose model",
+        #         "Render some self play games",
+        #         "Play against MuZero",
+        #         "Test the game manually",
+        #         "Hyperparameter search",
+        #         "Exit",
+        #     ]
+        #     print()
+        #     for i in range(len(options)):
+        #         print(f"{i}. {options[i]}")
 
-            choice = input("Enter a number to choose an action: ")
-            valid_inputs = [str(i) for i in range(len(options))]
-            while choice not in valid_inputs:
-                choice = input("Invalid input, enter a number listed above: ")
-            choice = int(choice)
-            if choice == 0:
-                muzero.train()
-            elif choice == 1:
-                load_model_menu(muzero, game_name)
-            elif choice == 2:
-                muzero.diagnose_model(30)
-            elif choice == 3:
-                muzero.test(render=True, opponent="self", muzero_player=None)
-            elif choice == 4:
-                muzero.test(render=True, opponent="human", muzero_player=0)
-            elif choice == 5:
-                env = muzero.Game()
-                env.reset()
-                env.render()
+        #     choice = input("Enter a number to choose an action: ")
+        #     valid_inputs = [str(i) for i in range(len(options))]
+        #     while choice not in valid_inputs:
+        #         choice = input("Invalid input, enter a number listed above: ")
+        #     choice = int(choice)
+        #     if choice == 0:
+        #         muzero.train()
+        #     elif choice == 1:
+        #         load_model_menu(muzero, game_name)
+        #     elif choice == 2:
+        #         muzero.diagnose_model(30)
+        #     elif choice == 3:
+        #         muzero.test(render=True, opponent="self", muzero_player=None)
+        #     elif choice == 4:
+        #         muzero.test(render=True, opponent="human", muzero_player=0)
+        #     elif choice == 5:
+        #         env = muzero.Game()
+        #         env.reset()
+        #         env.render()
 
-                done = False
-                while not done:
-                    action = env.human_to_action()
-                    observation, reward, done = env.step(action)
-                    print(f"\nAction: {env.action_to_string(action)}\nReward: {reward}")
-                    env.render()
-            elif choice == 6:
-                # Define here the parameters to tune
-                # Parametrization documentation: https://facebookresearch.github.io/nevergrad/parametrization.html
-                muzero.terminate_workers()
-                del muzero
-                budget = 20
-                parallel_experiments = 2
-                lr_init = nevergrad.p.Log(lower=0.0001, upper=0.1)
-                discount = nevergrad.p.Log(lower=0.95, upper=0.9999)
-                parametrization = nevergrad.p.Dict(lr_init=lr_init, discount=discount)
-                best_hyperparameters = hyperparameter_search(
-                    game_name, parametrization, budget, parallel_experiments, 20
-                )
-                muzero = MuZero(game_name, best_hyperparameters)
-            else:
-                break
-            print("\nDone")
+        #         done = False
+        #         while not done:
+        #             action = env.human_to_action()
+        #             observation, reward, done = env.step(action)
+        #             print(f"\nAction: {env.action_to_string(action)}\nReward: {reward}")
+        #             env.render()
+        #     elif choice == 6:
+        #         # Define here the parameters to tune
+        #         # Parametrization documentation: https://facebookresearch.github.io/nevergrad/parametrization.html
+        #         muzero.terminate_workers()
+        #         del muzero
+        #         budget = 20
+        #         parallel_experiments = 2
+        #         lr_init = nevergrad.p.Log(lower=0.0001, upper=0.1)
+        #         discount = nevergrad.p.Log(lower=0.95, upper=0.9999)
+        #         parametrization = nevergrad.p.Dict(lr_init=lr_init, discount=discount)
+        #         best_hyperparameters = hyperparameter_search(
+        #             game_name, parametrization, budget, parallel_experiments, 20
+        #         )
+        #         muzero = MuZero(game_name, best_hyperparameters)
+        #     else:
+        #         break
+        #     print("\nDone")
 
     ray.shutdown()
